@@ -26,6 +26,8 @@ use devices::Bus;
 use devices::IrqChip;
 #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
 use devices::IrqChipAArch64 as IrqChipArch;
+#[cfg(target_arch = "riscv64")]
+use devices::IrqChipRiscv64 as IrqChipArch;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 use devices::IrqChipX86_64 as IrqChipArch;
 use devices::VcpuRunState;
@@ -41,19 +43,30 @@ use hypervisor::VcpuAArch64 as VcpuArch;
 use hypervisor::VcpuExit;
 #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
 use hypervisor::VcpuInitAArch64 as VcpuInitArch;
+#[cfg(target_arch = "riscv64")]
+use hypervisor::VcpuInitRiscv64 as VcpuInitArch;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 use hypervisor::VcpuInitX86_64 as VcpuInitArch;
+#[cfg(target_arch = "riscv64")]
+use hypervisor::VcpuRiscv64 as VcpuArch;
 use hypervisor::VcpuRunHandle;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 use hypervisor::VcpuX86_64 as VcpuArch;
 #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
 use hypervisor::VmAArch64 as VmArch;
+#[cfg(target_arch = "riscv64")]
+use hypervisor::VmRiscv64 as VmArch;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 use hypervisor::VmX86_64 as VmArch;
 use libc::c_int;
+#[cfg(target_arch = "riscv64")]
+use riscv64::MsrHandlers;
+#[cfg(target_arch = "riscv64")]
+use riscv64::Riscv64 as Arch;
 use sync::Condvar;
 use sync::Mutex;
 use vm_control::*;
+use vm_memory::GuestAddress;
 #[cfg(feature = "gdb")]
 use vm_memory::GuestMemory;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
@@ -164,6 +177,7 @@ pub fn runnable_vcpu<V>(
     has_bios: bool,
     use_hypervisor_signals: bool,
     cpu_config: Option<CpuConfigArch>,
+    fdt_address: Option<GuestAddress>,
 ) -> Result<(V, VcpuRunHandle)>
 where
     V: VcpuArch,
@@ -197,7 +211,7 @@ where
         cpu_id,
         vcpu_count,
         has_bios,
-        None,
+        fdt_address,
     )
     .context("failed to configure vcpu")?;
 
@@ -547,6 +561,27 @@ where
                         run_mode = VmRunMode::Breakpoint;
                     }
                 }
+                Ok(VcpuExit::Sbi {
+                    extension_id: _,
+                    function_id: _,
+                    args: _,
+                }) => {
+                    unimplemented!("Sbi exits not yet supported");
+                }
+                Ok(VcpuExit::RiscvCsr {
+                    csr_num,
+                    new_value,
+                    write_mask,
+                    ret_value: _,
+                }) => {
+                    unimplemented!(
+                        "csr exit! {:#x} to {:#x} mask {:#x}",
+                        csr_num,
+                        new_value,
+                        write_mask
+                    );
+                }
+
                 Ok(r) => warn!("unexpected vcpu exit: {:?}", r),
                 Err(e) => match e.errno() {
                     libc::EINTR => interrupted_by_signal = true,
@@ -606,6 +641,7 @@ pub fn run_vcpu<V>(
     vcpu_cgroup_tasks_file: Option<File>,
     userspace_msr: BTreeMap<u32, MsrConfig>,
     guest_suspended_cvar: Arc<(Mutex<bool>, Condvar)>,
+    fdt_address: Option<GuestAddress>,
 ) -> Result<JoinHandle<()>>
 where
     V: VcpuArch + 'static,
@@ -641,6 +677,7 @@ where
                     has_bios,
                     use_hypervisor_signals,
                     cpu_config,
+                    fdt_address,
                 );
 
                 // Add MSR handlers after CPU affinity setting.
