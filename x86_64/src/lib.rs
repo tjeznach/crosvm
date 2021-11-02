@@ -879,6 +879,7 @@ impl arch::LinuxArch for X8664arch {
             #[cfg(unix)]
             platform_devices: Vec::new(),
             hotplug_bus: BTreeMap::new(),
+            fdt_address: None,
         })
     }
 
@@ -892,6 +893,7 @@ impl arch::LinuxArch for X8664arch {
         num_cpus: usize,
         _has_bios: bool,
         cpu_config: Option<CpuConfigX86_64>,
+        _fdt_address: Option<GuestAddress>,
     ) -> Result<()> {
         let cpu_config = match cpu_config {
             Some(config) => config,

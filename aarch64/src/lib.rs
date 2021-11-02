@@ -598,6 +598,7 @@ impl arch::LinuxArch for AArch64 {
             root_config: pci_root,
             platform_devices,
             hotplug_bus: BTreeMap::new(),
+            fdt_address: None,
         })
     }
 
@@ -611,6 +612,7 @@ impl arch::LinuxArch for AArch64 {
         _num_cpus: usize,
         _has_bios: bool,
         _cpu_config: Option<CpuConfigAArch64>,
+        _fdt_address: Option<GuestAddress>,
     ) -> std::result::Result<(), Self::Error> {
         // AArch64 doesn't configure vcpus on the vcpu thread, so nothing to do here.
         Ok(())
