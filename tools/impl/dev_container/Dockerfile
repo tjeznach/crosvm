@@ -12,18 +12,17 @@ RUN mkdir -p /scratch/cargo_target \
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV CARGO_TARGET_DIR=/scratch/cargo_target
 
-# Add foreign architectures for cross-compilation.
-RUN dpkg --add-architecture arm64 \
-    && dpkg --add-architecture armhf
 
 # Install dependencies.
-COPY tools/install-deps tools/install-aarch64-deps tools/install-armhf-deps tools/install-docs-deps /tools/
+COPY tools/install-deps tools/install-aarch64-deps tools/install-armhf-deps tools/install-riscv64-deps tools/install-docs-deps /tools/
 RUN chmod 755 /tools/install-deps /tools/install-aarch64-deps /tools/install-armhf-deps /tools/install-docs-deps \
     && apt update \
     && apt install --yes sudo \
+    && apt-get install --yes debian-ports-archive-keyring \
     && /tools/install-deps \
     && /tools/install-aarch64-deps \
     && /tools/install-armhf-deps \
+    && /tools/install-riscv64-deps \
     && /tools/install-docs-deps \
     # Clear apt cache to save space in layer.
     && rm -rf /var/lib/apt/lists/* \
@@ -51,10 +50,12 @@ RUN sudo ln -sf /usr/bin/wine64-stable /usr/bin/wine64 \
 
 # Prebuild aarch64 VM image for faster startup.
 COPY tools/aarch64vm /tools/
+COPY tools/riscv64vm /tools/
 COPY /tools/impl/testvm.py /tools/impl/
 COPY /tools/impl/testvm/version /tools/impl/testvm/
 RUN sudo chmod 755 /tools/aarch64vm /tools/impl/testvm.py \
     && /tools/aarch64vm build
+    && /tools/riscv64vm build
 
 # Cache CARGO_HOME between container runs in CI.
 VOLUME /cache
