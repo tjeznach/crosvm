@@ -4,8 +4,14 @@
 
 use base::Result;
 use downcast_rs::impl_downcast;
+use vm_memory::GuestAddress;
 
-use crate::{Hypervisor, IrqRoute, IrqSource, IrqSourceChip, Vcpu, Vm};
+use crate::Hypervisor;
+use crate::IrqRoute;
+use crate::IrqSource;
+use crate::IrqSourceChip;
+use crate::Vcpu;
+use crate::Vm;
 
 /// A wrapper for using a VM on riscv64 and getting/setting its state.
 pub trait VmRiscv64: Vm {
@@ -30,6 +36,19 @@ impl_downcast!(VcpuRiscv64);
 /// Initial state for Riscv64 VCPUs.
 #[derive(Clone, Default)]
 pub struct VcpuInitRiscv64 {}
+
+/// Hold the CPU feature configurations that are needed to setup a vCPU.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CpuConfigRiscv64 {
+    /// The address of the FDT
+    pub fdt_address: GuestAddress,
+}
+
+impl CpuConfigRiscv64 {
+    pub fn new(fdt_address: GuestAddress) -> Self {
+        Self { fdt_address }
+    }
+}
 
 /// Config registers exposed by kvm.
 #[repr(u64)]

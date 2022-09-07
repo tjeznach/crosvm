@@ -67,6 +67,8 @@ use gdbstub::arch::Arch;
 use gdbstub_arch::x86::X86_64_SSE as GdbArch;
 #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
 use hypervisor::CpuConfigAArch64 as CpuConfigArch;
+#[cfg(target_arch = "riscv64")]
+use hypervisor::CpuConfigRiscv64 as CpuConfigArch;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 use hypervisor::CpuConfigX86_64 as CpuConfigArch;
 #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
@@ -312,7 +314,6 @@ pub trait LinuxArch {
         num_cpus: usize,
         has_bios: bool,
         cpu_config: Option<CpuConfigArch>,
-        fdt_address: Option<GuestAddress>,
     ) -> Result<(), Self::Error>;
 
     /// Configures and add a pci device into vm

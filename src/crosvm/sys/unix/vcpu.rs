@@ -33,6 +33,8 @@ use devices::IrqChipX86_64 as IrqChipArch;
 use devices::VcpuRunState;
 #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
 use hypervisor::CpuConfigAArch64 as CpuConfigArch;
+#[cfg(target_arch = "riscv64")]
+use hypervisor::CpuConfigRiscv64 as CpuConfigArch;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 use hypervisor::CpuConfigX86_64 as CpuConfigArch;
 use hypervisor::IoOperation;
@@ -177,7 +179,7 @@ pub fn runnable_vcpu<V>(
     has_bios: bool,
     use_hypervisor_signals: bool,
     cpu_config: Option<CpuConfigArch>,
-    fdt_address: Option<GuestAddress>,
+    _fdt_address: Option<GuestAddress>,
 ) -> Result<(V, VcpuRunHandle)>
 where
     V: VcpuArch,
@@ -211,7 +213,7 @@ where
         cpu_id,
         vcpu_count,
         has_bios,
-        fdt_address,
+        cpu_config,
     )
     .context("failed to configure vcpu")?;
 
@@ -641,7 +643,6 @@ pub fn run_vcpu<V>(
     vcpu_cgroup_tasks_file: Option<File>,
     userspace_msr: BTreeMap<u32, MsrConfig>,
     guest_suspended_cvar: Arc<(Mutex<bool>, Condvar)>,
-    fdt_address: Option<GuestAddress>,
 ) -> Result<JoinHandle<()>>
 where
     V: VcpuArch + 'static,
@@ -677,7 +678,7 @@ where
                     has_bios,
                     use_hypervisor_signals,
                     cpu_config,
-                    fdt_address,
+                    None,
                 );
 
                 // Add MSR handlers after CPU affinity setting.

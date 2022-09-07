@@ -129,6 +129,8 @@ use gpu::*;
 use hypervisor::kvm::Kvm;
 use hypervisor::kvm::KvmVcpu;
 use hypervisor::kvm::KvmVm;
+#[cfg(target_arch = "riscv64")]
+use hypervisor::CpuConfigRiscv64;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 use hypervisor::CpuConfigX86_64;
 use hypervisor::HypervisorCap;
@@ -2349,6 +2351,9 @@ fn run_control<V: VmArch + 'static, Vcpu: VcpuArch + 'static>(
         #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
         let cpu_config = None;
 
+        #[cfg(target_arch = "riscv64")]
+        let cpu_config = linux.fdt_address.map(CpuConfigRiscv64::new);
+
         let handle = vcpu::run_vcpu(
             cpu_id,
             vcpu_ids[cpu_id],
@@ -2387,7 +2392,6 @@ fn run_control<V: VmArch + 'static, Vcpu: VcpuArch + 'static>(
             },
             cfg.userspace_msr.clone(),
             guest_suspended_cvar.clone(),
-            linux.fdt_address,
         )?;
         vcpu_handles.push((handle, to_vcpu_channel));
     }

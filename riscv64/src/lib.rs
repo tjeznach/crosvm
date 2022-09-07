@@ -4,6 +4,7 @@
 
 use std::collections::BTreeMap;
 use std::io::{self};
+use std::sync::mpsc;
 use std::sync::Arc;
 
 use arch::{
@@ -12,10 +13,11 @@ use arch::{
 };
 use base::{Event, SendTube};
 use devices::serial_device::{SerialHardware, SerialParameters};
+use devices::PciRootCommand;
 use devices::{Bus, BusDeviceObj, BusError, IrqChipRiscv64, PciAddress, PciConfigMmio, PciDevice};
 use hypervisor::{
-    CoreRegister, Hypervisor, ProtectionType, TimerRegister, VcpuInitRiscv64, VcpuRegister,
-    VcpuRiscv64, Vm, VmRiscv64,
+    CoreRegister, CpuConfigRiscv64, Hypervisor, ProtectionType, TimerRegister, VcpuInitRiscv64,
+    VcpuRegister, VcpuRiscv64, Vm, VmRiscv64,
 };
 use minijail::Minijail;
 use remain::sorted;
@@ -76,6 +78,8 @@ pub enum Error {
     CreateFdt(arch::fdt::Error),
     #[error("failed to create a PCI root hub: {0}")]
     CreatePciRoot(arch::DeviceRegistrationError),
+    #[error("failed to create platform bus: {0}")]
+    CreatePlatformBus(arch::DeviceRegistrationError),
     #[error("unable to create serial devices: {0}")]
     CreateSerialDevices(arch::DeviceRegistrationError),
     #[error("failed to create socket: {0}")]
@@ -149,7 +153,7 @@ impl arch::LinuxArch for Riscv64 {
         system_allocator: &mut SystemAllocator,
         serial_parameters: &BTreeMap<(SerialHardware, u8), SerialParameters>,
         serial_jail: Option<Minijail>,
-        _battery: (&Option<BatteryType>, Option<Minijail>),
+        (_bat_type, _bat_jail): (Option<BatteryType>, Option<Minijail>),
         mut vm: V,
         ramoops_region: Option<arch::pstore::RamoopsRegion>,
         devices: Vec<(Box<dyn BusDeviceObj>, Option<Minijail>)>,
@@ -161,7 +165,7 @@ impl arch::LinuxArch for Riscv64 {
         V: VmRiscv64,
         Vcpu: VcpuRiscv64,
     {
-        if components.protected_vm == ProtectionType::Protected {
+        if components.protection_type == ProtectionType::Protected {
             return Err(Error::ProtectedVmUnsupported);
         }
 
@@ -175,7 +179,7 @@ impl arch::LinuxArch for Riscv64 {
         let com_evt_1_3 = Event::new().map_err(Error::CreateEvent)?;
         let com_evt_2_4 = Event::new().map_err(Error::CreateEvent)?;
         arch::add_serial_devices(
-            components.protected_vm,
+            components.protection_type,
             &mmio_bus,
             &com_evt_1_3,
             &com_evt_2_4,
@@ -184,14 +188,14 @@ impl arch::LinuxArch for Riscv64 {
         )
         .map_err(Error::CreateSerialDevices)?;
 
-        let (pci_devices, _others): (Vec<_>, Vec<_>) = devices
+        let (pci_devices, others): (Vec<_>, Vec<_>) = devices
             .into_iter()
             .partition(|(dev, _)| dev.as_pci_device().is_some());
         let pci_devices = pci_devices
             .into_iter()
             .map(|(dev, jail_orig)| (dev.into_pci_device().unwrap(), jail_orig))
             .collect();
-        let (pci, pci_irqs, pid_debug_label_map) = arch::generate_pci_root(
+        let (pci, pci_irqs, mut pid_debug_label_map) = arch::generate_pci_root(
             pci_devices,
             irq_chip.as_irq_chip_mut(),
             Arc::clone(&mmio_bus),
@@ -204,6 +208,23 @@ impl arch::LinuxArch for Riscv64 {
 
         let pci_root = Arc::new(Mutex::new(pci));
         let pci_bus = Arc::new(Mutex::new(PciConfigMmio::new(pci_root.clone(), 8)));
+        let (platform_devices, _others): (Vec<_>, Vec<_>) = others
+            .into_iter()
+            .partition(|(dev, _)| dev.as_platform_device().is_some());
+
+        let platform_devices = platform_devices
+            .into_iter()
+            .map(|(dev, jail_orig)| (*(dev.into_platform_device().unwrap()), jail_orig))
+            .collect();
+        let (platform_devices, mut platform_pid_debug_label_map) =
+            arch::sys::unix::generate_platform_bus(
+                platform_devices,
+                irq_chip.as_irq_chip_mut(),
+                &mmio_bus,
+                system_allocator,
+            )
+            .map_err(Error::CreatePlatformBus)?;
+        pid_debug_label_map.append(&mut platform_pid_debug_label_map);
 
         let mut cmdline = get_base_linux_cmdline();
 
@@ -337,7 +358,8 @@ impl arch::LinuxArch for Riscv64 {
             pid_debug_label_map,
             resume_notify_devices: Vec::new(),
             root_config: pci_root,
-            hotplug_bus: Vec::new(),
+            platform_devices,
+            hotplug_bus: BTreeMap::new(),
             rt_cpus: components.rt_cpus,
             delay_rt: components.delay_rt,
             suspend_evt,
@@ -356,19 +378,17 @@ impl arch::LinuxArch for Riscv64 {
         vcpu_id: usize,
         _num_cpus: usize,
         _has_bios: bool,
-        _no_smt: bool,
-        _host_cpu_topology: bool,
-        _enable_pnp_data: bool,
-        _itmt: bool,
-        _force_calibrated_tsc_leaf: bool,
-        fdt_address: Option<GuestAddress>,
+        cpu_config: Option<CpuConfigRiscv64>,
     ) -> std::result::Result<(), Self::Error> {
         vcpu.set_one_reg(VcpuRegister::Core(CoreRegister::Pc), get_kernel_addr().0)
             .map_err(Self::Error::SetReg)?;
         vcpu.set_one_reg(VcpuRegister::Core(CoreRegister::A0), vcpu_id as u64)
             .map_err(Self::Error::SetReg)?;
-        vcpu.set_one_reg(VcpuRegister::Core(CoreRegister::A1), fdt_address.unwrap().0)
-            .map_err(Self::Error::SetReg)?;
+        vcpu.set_one_reg(
+            VcpuRegister::Core(CoreRegister::A1),
+            cpu_config.unwrap().fdt_address.0,
+        )
+        .map_err(Self::Error::SetReg)?;
 
         Ok(())
     }
@@ -378,6 +398,7 @@ impl arch::LinuxArch for Riscv64 {
         _device: Box<dyn PciDevice>,
         _minijail: Option<Minijail>,
         _resources: &mut SystemAllocator,
+        _tube: &mpsc::Sender<PciRootCommand>,
     ) -> std::result::Result<PciAddress, Self::Error> {
         // hotplug function isn't verified on Riscv64, so set it unsupported here.
         Err(Error::Unsupported)
