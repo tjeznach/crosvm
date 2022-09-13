@@ -124,6 +124,7 @@ enum KvmVfioGroupOps {
 #[repr(u32)]
 enum IommuType {
     Type1V2 = VFIO_TYPE1v2_IOMMU,
+    Type1Nesting = VFIO_TYPE1_NESTING_IOMMU,
     // ChromeOS specific vfio_iommu_type1 implementation that is optimized for
     // small, dynamic mappings. For clients which create large, relatively
     // static mappings, Type1V2 is still preferred.
@@ -342,7 +343,15 @@ impl VfioContainer {
             }
         }
 
-        if !self.check_extension(IommuType::Type1V2) {
+        // If 2-Stage IOMMU is available, try enabling G-Stage translation, fail
+        // back to regular Type1v2 version.
+        if self.check_extension(IommuType::Type1Nesting) {
+            if self.set_iommu(IommuType::Type1Nesting) == 0 {
+                return Ok(());
+            }
+        }
+
+        if self.check_extension(IommuType::Type1V2) {
             return Err(VfioError::VfioType1V2);
         }
 
