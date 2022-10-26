@@ -46,7 +46,7 @@ fn create_cpu_nodes(fdt: &mut FdtWriter, num_cpus: u32, timebase_frequency: u32)
         fdt.property_string("device_type", "cpu")?;
         fdt.property_string("compatible", "riscv")?;
         fdt.property_string("mmu-type", "sv48")?;
-        fdt.property_string("riscv,isa", "rv64iafdcsu")?;
+        fdt.property_string("riscv,isa", "rv64iafdcsu_smaia_ssaia")?;
         fdt.property_string("status", "okay")?;
         fdt.property_u32("reg", cpu_id)?;
         fdt.property_u32("phandle", PHANDLE_CPU0 + cpu_id)?;
